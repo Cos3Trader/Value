@@ -4,10 +4,29 @@ import pandas as pd
 import plotly.graph_objects as go
 
 st.set_page_config(page_title="Sommaire de la Valeur", layout="wide")
-st.title("📊 Sommaire de la Valeur - V2.2 (Style Recognia)")
+st.title("📊 Sommaire de la Valeur - V2.3 (Style Recognia)")
+
+# ====================== FONCTIONS HELPER (en haut !) ======================
+def clean_financial_df(df):
+    if df is None or df.empty:
+        return pd.DataFrame()
+    valid_cols = [col for col in df.columns 
+                  if hasattr(col, 'year') and col.year >= 2010]
+    if not valid_cols:
+        return df
+    return df[valid_cols].sort_index(axis=1, ascending=True)
+
+def get_net_income(income_df):
+    keys = ['Net Income Common Stockholders', 'Net Income', 
+            'Net Income From Continuing Operations', 
+            'Net Income Applicable To Common Shares']
+    for key in keys:
+        if key in income_df.index:
+            return income_df.loc[key]
+    return pd.Series([0] * len(income_df.columns), index=income_df.columns)
 
 # ====================== SIDEBAR ======================
-ticker_input = st.sidebar.text_input("Symbole (ex: NVMI, ABX.TO, GURU.V)", value="NVMI")
+ticker_input = st.sidebar.text_input("Symbole (ex: NVMI, TSLA, ABX.TO, GURU.V)", value="NVMI")
 period_options = st.sidebar.selectbox("Historique", ["10y", "5y", "max"], index=0)
 
 if st.sidebar.button("🚀 Analyser"):
@@ -21,17 +40,6 @@ balance = ticker.balance_sheet
 cashflow = ticker.cashflow
 history = ticker.history(period=period_options)
 
-# ====================== FONCTION DE NETTOYAGE ======================
-def clean_financial_df(df):
-    if df.empty or df is None:
-        return pd.DataFrame()
-    valid_cols = [col for col in df.columns 
-                  if pd.notnull(col) and hasattr(col, 'year') and col.year >= 2010]
-    if not valid_cols:
-        return df
-    df_clean = df[valid_cols].sort_index(axis=1, ascending=True)  # tri chronologique pour calculs
-    return df_clean
-
 income_clean = clean_financial_df(income)
 balance_clean = clean_financial_df(balance)
 cashflow_clean = clean_financial_df(cashflow)
@@ -39,10 +47,14 @@ cashflow_clean = clean_financial_df(cashflow)
 st.subheader(f"{info.get('longName', ticker_input)} ({ticker_input})")
 st.caption(info.get('longBusinessSummary', '')[:700] + "...")
 
-# ====================== RÉSUMÉ HAUT (style Recognia) ======================
+# ====================== RÉSUMÉ HAUT ======================
 col1, col2, col3, col4 = st.columns(4)
 with col1:
-    st.metric("Revenus", f"{info.get('totalRevenue', 0)/1e6:,.0f} M USD")
+    rev = info.get('totalRevenue', 0)
+    if rev >= 1e9:
+        st.metric("Revenus", f"{rev/1e9:,.1f} B USD")
+    else:
+        st.metric("Revenus", f"{rev/1e6:,.0f} M USD")
 with col2:
     st.metric("Croissance estimée BPA", f"{info.get('earningsGrowth', 0)*100:.1f} %")
 with col3:
@@ -63,7 +75,7 @@ with tab_rev:
     st.subheader("Historique des revenus et bénéfices")
     if not income_clean.empty:
         rev = income_clean.loc['Total Revenue'] / 1e6
-        net = get_net_income(income_clean)  # fonction déjà définie plus bas
+        net = get_net_income(income_clean)
         shares = info.get('sharesOutstanding', 1)
         eps = net / shares
 
@@ -90,11 +102,11 @@ with tab_val:
     st.metric("Juste Valeur estimée (5 ans)", f"${juste_valeur:,.2f}", 
               f"{(juste_valeur/current_price-1)*100:+.1f} %")
 
-with tab_fcf:
-    st.subheader("Analyse Cash Flow")
-    if not cashflow_clean.empty:
-        st.dataframe(cashflow_clean.style.format("{:,.0f}"))
-        # FCF + DCF (inchangé, déjà fonctionnel)
+with tab_cash:
+    st.subheader("Disponibilités et comptes assimilés")
+    if not balance_clean.empty and 'Cash And Cash Equivalents' in balance_clean.index:
+        cash = balance_clean.loc['Cash And Cash Equivalents'] / 1e6
+        st.bar_chart(cash)
 
 with tab_ratios:
     st.subheader("Ratios & PEG")
@@ -103,12 +115,17 @@ with tab_ratios:
     if peg is None and isinstance(pe, (int, float)) and growth_analyst > 0:
         peg = pe / growth_analyst
     st.metric("PEG Ratio", f"{peg:.2f}" if isinstance(peg, (int,float)) else "N/A")
+    st.caption("PEG < 1 = potentiellement sous-évalué")
 
-# ====================== TABLEAU ANNUEL AMÉLIORÉ (style Recognia) ======================
+with tab_fcf:
+    st.subheader("Analyse Cash Flow")
+    if not cashflow_clean.empty:
+        st.dataframe(cashflow_clean.style.format("{:,.0f}"))
+
+# ====================== TABLEAU ANNUEL (dernière année en haut) ======================
 st.subheader("📋 Données annuelles sur la compagnie (dernière année en haut)")
 
 if not income_clean.empty:
-    # Tri chronologique pour calculs YoY
     income_calc = income_clean.sort_index(axis=1, ascending=True)
     rev = income_calc.loc['Total Revenue'] / 1e6
     net = get_net_income(income_calc)
@@ -130,33 +147,21 @@ if not income_clean.empty:
     if 'Cash And Cash Equivalents' in balance_clean.index:
         cash = balance_clean.loc['Cash And Cash Equivalents'] / 1e6
 
-    # Création du tableau final
     df_annual = pd.DataFrame({
         "Année fiscale": rev.index.year,
-        "Revenus (million USD)": rev.round(0),
-        "Croissance Revenus (%)": rev_yoy.round(1),
+        "Revenus (M USD)": rev.round(0),
+        "Croiss. Rev. (%)": rev_yoy.round(1),
         "BPA": eps.round(2),
-        "Croissance BPA (%)": eps_yoy.round(1),
+        "Croiss. BPA (%)": eps_yoy.round(1),
         "Dette / Fonds propres": de_ratio.round(2),
-        "Encaisse (million USD)": cash.round(0),
-        "Actions (million)": round(shares / 1e6, 1)   # valeur actuelle (permet de voir la dilution)
+        "Encaisse (M USD)": cash.round(0),
+        "Actions (M)": round(shares / 1e6, 1)
     })
 
-    # Dernière année en haut + nettoyage
     df_annual = df_annual.sort_values("Année fiscale", ascending=False)
     df_annual = df_annual.set_index("Année fiscale")
-    df_annual = df_annual.fillna("-").replace(0, "-")
+    df_annual = df_annual.fillna("-").replace([0, -0.0], "-")
 
     st.dataframe(df_annual.style.format("{:,.1f}"), use_container_width=True)
 
-st.caption("✅ Style Recognia • Dernière année en haut • Unités claires • Croissances calculées • Données nettoyées (plus de 1970 ni de zéros inutiles)")
-
-# ====================== FONCTION NET INCOME (déjà présente) ======================
-def get_net_income(income_df):
-    keys = ['Net Income Common Stockholders', 'Net Income', 
-            'Net Income From Continuing Operations', 
-            'Net Income Applicable To Common Shares']
-    for key in keys:
-        if key in income_df.index:
-            return income_df.loc[key]
-    return pd.Series([0] * len(income_df.columns), index=income_df.columns)
+st.caption("✅ Dernière année en haut • Unités claires • Croissances % • Dilution visible • Données nettoyées")
