@@ -4,14 +4,13 @@ import pandas as pd
 import plotly.graph_objects as go
 
 st.set_page_config(page_title="Sommaire de la Valeur", layout="wide")
-st.title("📊 Sommaire de la Valeur - V2.3 (Style Recognia)")
+st.title("📊 Sommaire de la Valeur - V2.4 (Style Recognia)")
 
-# ====================== FONCTIONS HELPER (en haut !) ======================
+# ====================== FONCTIONS HELPER ======================
 def clean_financial_df(df):
     if df is None or df.empty:
         return pd.DataFrame()
-    valid_cols = [col for col in df.columns 
-                  if hasattr(col, 'year') and col.year >= 2010]
+    valid_cols = [col for col in df.columns if hasattr(col, 'year') and col.year >= 2010]
     if not valid_cols:
         return df
     return df[valid_cols].sort_index(axis=1, ascending=True)
@@ -122,7 +121,7 @@ with tab_fcf:
     if not cashflow_clean.empty:
         st.dataframe(cashflow_clean.style.format("{:,.0f}"))
 
-# ====================== TABLEAU ANNUEL (dernière année en haut) ======================
+# ====================== TABLEAU ANNUEL (Style Recognia) ======================
 st.subheader("📋 Données annuelles sur la compagnie (dernière année en haut)")
 
 if not income_clean.empty:
@@ -135,14 +134,12 @@ if not income_clean.empty:
     rev_yoy = rev.pct_change() * 100
     eps_yoy = eps.pct_change() * 100
 
-    # Dette / Fonds propres
     de_ratio = pd.Series([None] * len(rev))
     if 'Total Debt' in balance_clean.index and 'Stockholders Equity' in balance_clean.index:
         debt = balance_clean.loc['Total Debt']
         equity = balance_clean.loc['Stockholders Equity']
         de_ratio = (debt / equity).reindex(rev.index, method='nearest')
 
-    # Encaisse
     cash = pd.Series([None] * len(rev))
     if 'Cash And Cash Equivalents' in balance_clean.index:
         cash = balance_clean.loc['Cash And Cash Equivalents'] / 1e6
@@ -158,10 +155,13 @@ if not income_clean.empty:
         "Actions (M)": round(shares / 1e6, 1)
     })
 
+    # Dernière année en haut + nettoyage
     df_annual = df_annual.sort_values("Année fiscale", ascending=False)
     df_annual = df_annual.set_index("Année fiscale")
-    df_annual = df_annual.fillna("-").replace([0, -0.0], "-")
+    
+    # Version pour affichage (remplace NaN/0 par "-")
+    df_display = df_annual.fillna("-").replace([0, -0.0], "-")
+    
+    st.dataframe(df_display, use_container_width=True)
 
-    st.dataframe(df_annual.style.format("{:,.1f}"), use_container_width=True)
-
-st.caption("✅ Dernière année en haut • Unités claires • Croissances % • Dilution visible • Données nettoyées")
+st.caption("✅ Style Recognia • Dernière année en haut • Dilution + dette + encaisse visibles • Pas de zéros inutiles")
